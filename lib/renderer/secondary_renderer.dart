@@ -1,12 +1,11 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
+import 'package:k_chart/entity/k_line_entity.dart';
 
 import '../entity/macd_entity.dart';
 import '../k_chart_widget.dart' show SecondaryState;
 import 'base_chart_renderer.dart';
 
-class SecondaryRenderer extends BaseChartRenderer<MACDEntity> {
+class SecondaryRenderer extends BaseChartRenderer<KLineEntity> {
   late double mMACDWidth;
   SecondaryState state;
   final ChartStyle chartStyle;
@@ -32,7 +31,7 @@ class SecondaryRenderer extends BaseChartRenderer<MACDEntity> {
   }
 
   @override
-  void drawChart(MACDEntity lastPoint, MACDEntity curPoint, double lastX,
+  void drawChart(KLineEntity lastPoint, KLineEntity curPoint, double lastX,
       double curX, Size size, Canvas canvas) {
     switch (state) {
       case SecondaryState.MACD:
@@ -57,6 +56,11 @@ class SecondaryRenderer extends BaseChartRenderer<MACDEntity> {
       case SecondaryState.CCI:
         drawLine(lastPoint.cci, curPoint.cci, canvas, lastX, curX,
             this.chartColors.rsiColor);
+        break;
+      case SecondaryState.DMI:
+        drawLine(lastPoint.pdi, curPoint.pdi, canvas, lastX, curX, chartColors.dmiPlusColor);
+        drawLine(lastPoint.mdi, curPoint.mdi, canvas, lastX, curX, chartColors.dmiMinusColor);
+        drawLine(lastPoint.adx, curPoint.adx, canvas, lastX, curX, chartColors.dmiAdxColor);
         break;
       default:
         break;
@@ -87,7 +91,7 @@ class SecondaryRenderer extends BaseChartRenderer<MACDEntity> {
   }
 
   @override
-  void drawText(Canvas canvas, MACDEntity data, double x) {
+  void drawText(Canvas canvas, KLineEntity data, double x) {
     List<TextSpan>? children;
     switch (state) {
       case SecondaryState.MACD:
@@ -147,6 +151,14 @@ class SecondaryRenderer extends BaseChartRenderer<MACDEntity> {
           TextSpan(
               text: "CCI(14):${format(data.cci)}    ",
               style: getTextStyle(this.chartColors.rsiColor)),
+        ];
+        break;
+      case SecondaryState.DMI: // ← 新增
+        children = [
+          TextSpan(text: "DMI(14)    ", style: getTextStyle(chartColors.defaultTextColor)),
+          if (data.pdi != null) TextSpan(text: "+DI:${format(data.pdi)}    ", style: getTextStyle(chartColors.dmiPlusColor)),
+          if (data.mdi != null) TextSpan(text: "-DI:${format(data.mdi)}    ", style: getTextStyle(chartColors.dmiMinusColor)),
+          if (data.adx != null) TextSpan(text: "ADX:${format(data.adx)}    ", style: getTextStyle(chartColors.dmiAdxColor)),
         ];
         break;
       default:

@@ -11,6 +11,11 @@ class KLineEntity extends KEntity {
   double? ratio;
   int? time;
 
+  double? pdi;   // +DI
+  double? mdi;   // -DI
+  double? adx;   // ADX
+  double? adxr;  // ADXR（可選）
+
   KLineEntity.fromCustom({
     this.amount,
     required this.open,

@@ -64,6 +64,10 @@ class ChartColors {
         return ma5Color;
     }
   }
+
+  Color dmiPlusColor = const Color(0xFF4CAF50); // +DI 綠
+  Color dmiMinusColor = const Color(0xFFF44336); // -DI 紅
+  Color dmiAdxColor = const Color(0xFFFFC107); // ADX 黃
 }
 
 class ChartStyle {

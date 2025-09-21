@@ -2,6 +2,114 @@ import 'dart:math';
 
 import '../entity/index.dart';
 
+/// DMI / ADX / ADXR 計算（Wilder 平滑）
+/// 輸入：open/high/low/close 同長度、按時間遞增（舊→新）
+/// 輸出：與輸入等長的 List，前期不足 N 的位置為 null。
+class DmiResult {
+  final List<double?> plusDI; // +DI
+  final List<double?> minusDI; // -DI
+  final List<double?> adx;    // ADX
+  final List<double?> adxr;   // ADXR（若 withAdxr=false，仍回傳等長但都為 null）
+  const DmiResult(this.plusDI, this.minusDI, this.adx, this.adxr);
+}
+
+DmiResult _computeDMI({
+  required List<double> high,
+  required List<double> low,
+  required List<double> close,
+  int period = 14,
+  bool withAdxr = true,
+}) {
+  assert(high.length == low.length && low.length == close.length && high.isNotEmpty);
+  final n = high.length;
+  final plusDM = List<double>.filled(n, 0);
+  final minusDM = List<double>.filled(n, 0);
+  final tr = List<double>.filled(n, 0);
+
+  for (int i = 1; i < n; i++) {
+    final up = high[i] - high[i - 1];
+    final down = low[i - 1] - low[i];
+    plusDM[i] = (up > 0 && up > down) ? up : 0.0;
+    minusDM[i] = (down > 0 && down > up) ? down : 0.0;
+    final tr1 = high[i] - low[i];
+    final tr2 = (high[i] - close[i - 1]).abs();
+    final tr3 = (low[i] - close[i - 1]).abs();
+    tr[i] = [tr1, tr2, tr3].reduce((a, b) => a > b ? a : b);
+  }
+
+  double smTR = 0, smPDM = 0, smMDM = 0;
+  for (int i = 1; i <= period && i < n; i++) {
+    smTR += tr[i];
+    smPDM += plusDM[i];
+    smMDM += minusDM[i];
+  }
+
+  final pdi = List<double?>.filled(n, null);
+  final mdi = List<double?>.filled(n, null);
+  final dx = List<double?>.filled(n, null);
+  final adx = List<double?>.filled(n, null);
+  final adxr = List<double?>.filled(n, null);
+
+  if (n <= period) {
+    return DmiResult(pdi, mdi, adx, adxr);
+  }
+
+  // 第一個可用點（i=period）用簡單均值初始化
+  pdi[period] = smTR == 0 ? 0 : 100.0 * (smPDM / smTR);
+  mdi[period] = smTR == 0 ? 0 : 100.0 * (smMDM / smTR);
+  dx[period] = ((pdi[period]! - mdi[period]!).abs()) /
+      ((pdi[period]! + mdi[period]!).abs() == 0 ? 1e-12 : (pdi[period]! + mdi[period]!)) *
+      100.0;
+
+  // 之後用 Wilder 平滑
+  for (int i = period + 1; i < n; i++) {
+    smTR = smTR - (smTR / period) + tr[i];
+    smPDM = smPDM - (smPDM / period) + plusDM[i];
+    smMDM = smMDM - (smMDM / period) + minusDM[i];
+    final double curP = smTR == 0 ? 0 : 100.0 * (smPDM / smTR);
+    final double curM = smTR == 0 ? 0 : 100.0 * (smMDM / smTR);
+    pdi[i] = curP;
+    mdi[i] = curM;
+    final denom = (curP + curM).abs();
+    dx[i] = denom == 0 ? 0 : 100.0 * (curP - curM).abs() / denom;
+  }
+
+  // ADX: 對 DX 再做 Wilder 平滑
+  double? adxSeed;
+  double adxSm = 0;
+  int cnt = 0;
+  for (int i = 0; i < n; i++) {
+    if (dx[i] == null) continue;
+    if (adxSeed == null) {
+      // 取接下來的 period 個 DX 的平均作為 seed
+      final start = i;
+      final end = (i + period).clamp(0, n);
+      final slice = dx.sublist(start, end).whereType<double>();
+      if (slice.length == period) {
+        adxSeed = slice.reduce((a, b) => a + b) / period;
+        adx[i + period - 1] = adxSeed; // 第一次可用點
+        cnt = i + period - 1;
+        adxSm = adxSeed;
+      }
+      continue;
+    }
+    if (i <= cnt) continue; // 尚未到下一點
+    adxSm = adxSm - (adxSm / period) + (dx[i] ?? 0);
+    adx[i] = adxSm;
+  }
+
+  if (withAdxr) {
+    for (int i = 0; i < n; i++) {
+      final j = i - period;
+      if (j >= 0 && adx[i] != null && adx[j] != null) {
+        adxr[i] = (adx[i]! + adx[j]!) / 2.0;
+      }
+    }
+  }
+
+  return DmiResult(pdi, mdi, adx, adxr);
+}
+
 class DataUtil {
   static calculate(List<KLineEntity> dataList,
       [List<int> maDayList = const [5, 10, 20], int n = 20, k = 2]) {
@@ -249,6 +357,21 @@ class DataUtil {
       if (kline.cci!.isNaN) {
         kline.cci = 0.0;
       }
+    }
+  }
+
+  // 既有：calculate (MA/BOLL/MACD/KDJ/RSI...)
+  static void calculateDMI(List<KLineEntity> data, {int period = 14, bool withAdxr = true}) {
+    if (data.length <= period) return;
+    final high = data.map((e) => e.high ?? 0).toList();
+    final low  = data.map((e) => e.low  ?? 0).toList();
+    final close= data.map((e) => e.close?? 0).toList();
+    final r = _computeDMI(high: high, low: low, close: close, period: period, withAdxr: withAdxr);
+    for (int i = 0; i < data.length; i++) {
+      data[i].pdi  = r.plusDI[i];
+      data[i].mdi  = r.minusDI[i];
+      data[i].adx  = r.adx[i];
+      data[i].adxr = r.adxr[i];
     }
   }
 }
