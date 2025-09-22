@@ -360,18 +360,90 @@ class DataUtil {
     }
   }
 
-  // 既有：calculate (MA/BOLL/MACD/KDJ/RSI...)
-  static void calculateDMI(List<KLineEntity> data, {int period = 14, bool withAdxr = true}) {
-    if (data.length <= period) return;
-    final high = data.map((e) => e.high ?? 0).toList();
-    final low  = data.map((e) => e.low  ?? 0).toList();
-    final close= data.map((e) => e.close?? 0).toList();
-    final r = _computeDMI(high: high, low: low, close: close, period: period, withAdxr: withAdxr);
-    for (int i = 0; i < data.length; i++) {
-      data[i].pdi  = r.plusDI[i];
-      data[i].mdi  = r.minusDI[i];
-      data[i].adx  = r.adx[i];
-      data[i].adxr = r.adxr[i];
+  // === DataUtil.dart 內新增：TradingView 版 DMI/ADX ===
+  static void calculateDMI(List<KLineEntity> data, {int len = 14, int lensig = 14}) {
+    final n = data.length;
+    if (n < 2) return;
+
+    // up = change(high), down = -change(low)
+    final plusDM  = List<double>.filled(n, 0);
+    final minusDM = List<double>.filled(n, 0);
+    final tr      = List<double>.filled(n, 0);
+
+    for (int i = 1; i < n; i++) {
+      final up   = data[i].high - data[i - 1].high;
+      final down = data[i - 1].low - data[i].low; // 已含負號
+
+      plusDM[i]  = (up > down && up > 0)   ? up   : 0.0; // Pine: up > down and up > 0 ? up : 0
+      minusDM[i] = (down > up && down > 0) ? down : 0.0; // Pine: down > up and down > 0 ? down : 0
+
+      final tr1 = data[i].high - data[i].low;
+      final tr2 = (data[i].high - data[i - 1].close).abs();
+      final tr3 = (data[i].low  - data[i - 1].close).abs();
+      tr[i] = tr1 > tr2 ? (tr1 > tr3 ? tr1 : tr3) : (tr2 > tr3 ? tr2 : tr3); // max(tr1,tr2,tr3)
+    }
+
+    // ta.rma 等同 Wilder 平滑： seed=SMA(len)，之後 rma = (prev*(len-1)+x)/len
+    List<double?> _rma(List<double> src, int l) {
+      final out = List<double?>.filled(src.length, null);
+      if (l <= 1) {
+        for (int i = 0; i < src.length; i++) out[i] = src[i];
+        return out;
+      }
+      if (src.length < l) return out;
+
+      double sum = 0;
+      for (int i = 0; i < l; i++) sum += src[i];
+      double prev = sum / l;
+      out[l - 1] = prev;
+
+      for (int i = l; i < src.length; i++) {
+        prev = (prev * (l - 1) + src[i]) / l;
+        out[i] = prev;
+      }
+      return out;
+    }
+
+    final trRma    = _rma(tr, len);         // trur = ta.rma(ta.tr, len)
+    final pdmRma   = _rma(plusDM, len);     // ta.rma(plusDM, len)
+    final mdmRma   = _rma(minusDM, len);    // ta.rma(minusDM, len)
+
+    final plus  = List<double?>.filled(n, null);
+    final minus = List<double?>.filled(n, null);
+
+    for (int i = 0; i < n; i++) {
+      final trv = trRma[i];
+      final pr  = pdmRma[i];
+      final mr  = mdmRma[i];
+      if (trv != null && trv != 0 && pr != null && mr != null) {
+        // fixnan(100 * rma(dm,len) / trur)；我們用 null 表示前置不足，不畫線更乾淨
+        plus[i]  = 100.0 * pr / trv;
+        minus[i] = 100.0 * mr / trv;
+      }
+    }
+
+    // adx = 100 * ta.rma(|plus - minus| / max(sum,1), lensig)
+    final dxInput = List<double>.filled(n, 0);
+    for (int i = 0; i < n; i++) {
+      final p = plus[i];
+      final m = minus[i];
+      if (p != null && m != null) {
+        final s = (p + m).abs();
+        dxInput[i] = (s == 0) ? 0 : ((p - m).abs() / s);
+      } // else 0，讓 RMA 在有效區間後逐步收斂
+    }
+    final adxRma = _rma(dxInput, lensig);
+    final adx    = List<double?>.filled(n, null);
+    for (int i = 0; i < n; i++) {
+      adx[i] = adxRma[i] == null ? null : 100.0 * adxRma[i]!;
+    }
+
+    // 回灌到 entity（把欄位加在 MACDEntity 或 KLineEntity；之前我們建議加在 MACDEntity）
+    for (int i = 0; i < n; i++) {
+      data[i].pdi = plus[i];
+      data[i].mdi = minus[i];
+      data[i].adx = adx[i];
+      // 若要 ADXR，可再算：adxr[i] = (adx[i] + adx[i-len]) / 2
     }
   }
 }

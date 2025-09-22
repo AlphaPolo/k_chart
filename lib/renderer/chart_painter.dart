@@ -128,39 +128,26 @@ class ChartPainter extends BaseChartPainter {
           mChildPadding, fixedLength, this.chartStyle, this.chartColors);
     }
     if (mSecondaryRect != null) {
-      // 🔸 只有在 DMI 副圖時，依目前視窗把 pdi/mdi/adx 納入 min/max
       if (secondaryState == SecondaryState.DMI && datas != null && datas!.isNotEmpty) {
-        double secMin = double.maxFinite;
-        double secMax = -double.maxFinite;
-
-        // 以「可見區間」為準（mStartIndex..mStopIndex），這兩個值在 BaseChartPainter 裡會被算好
-        final int start = mStartIndex.clamp(0, datas!.length - 1);
-        final int end = mStopIndex.clamp(0, datas!.length - 1);
-
+        double secMin = double.maxFinite, secMax = -double.maxFinite;
+        final start = mStartIndex.clamp(0, datas!.length - 1);
+        final end   = mStopIndex.clamp(0, datas!.length - 1);
         for (int i = start; i <= end; i++) {
           final e = datas![i];
           if (e.pdi != null) { secMin = math.min(secMin, e.pdi!); secMax = math.max(secMax, e.pdi!); }
           if (e.mdi != null) { secMin = math.min(secMin, e.mdi!); secMax = math.max(secMax, e.mdi!); }
           if (e.adx != null) { secMin = math.min(secMin, e.adx!); secMax = math.max(secMax, e.adx!); }
         }
-
-        // 若整段都沒值，給預設 0~100；再留 5% 視覺 padding
         if (!secMin.isFinite || !secMax.isFinite) { secMin = 0; secMax = 100; }
+        if (secMax - secMin < 1e-6) secMax = secMin + 1;
         final pad = (secMax - secMin) * 0.05;
         mSecondaryMinValue = secMin - pad;
         mSecondaryMaxValue = secMax + pad;
       }
 
       mSecondaryRenderer = SecondaryRenderer(
-        mSecondaryRect!,
-        mSecondaryMaxValue,
-        mSecondaryMinValue,
-        mChildPadding,
-        secondaryState,
-        fixedLength,
-        chartStyle,
-        chartColors,
-      );
+          mSecondaryRect!, mSecondaryMaxValue, mSecondaryMinValue, mChildPadding,
+          secondaryState, fixedLength, chartStyle, chartColors);
     }
   }
 
